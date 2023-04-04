@@ -1,5 +1,3 @@
-#include <openssl/sha.h>
-
 /* (11...) SYNC type packet: synchronization before sending data. */
 typedef struct {
     unsigned char type; /* 11000000 for this packet type. */
