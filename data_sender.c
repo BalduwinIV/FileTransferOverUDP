@@ -9,6 +9,7 @@
 
 #include "tools.h"
 #include "listener.h"
+#include "sender.h"
 #include "packets.h"
 
 #define     SUCCESS_CODE        0
@@ -48,6 +49,8 @@ int main (int argc, char **argv) {
         start_listener(local_ip_addr, local_port);
     } else if (operation == STOP) {
         stop_listeners();
+    } else if (operation == SEND_DATA) {
+        send_data(local_ip_addr, local_port, dest_ip_addr, dest_port, argv[argc-1]);
     }
     return SUCCESS_CODE;
 }
