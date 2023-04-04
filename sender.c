@@ -87,7 +87,7 @@ void send_SYNC_packet(int socket_desc, int local_port, char* filename) {
     char server_message[BUF_SIZE];
     char client_message[BUF_SIZE];
 
-    memcpy(client_message, (char*)&sync_packet, BUF_SIZE);
+    memcpy(client_message, (char*)&sync_packet, sizeof(SYNC_packet_t));
 
     ACK_packet_t ack_packet;
     ack_packet.hash = 0;
@@ -108,7 +108,7 @@ void send_SYNC_packet(int socket_desc, int local_port, char* filename) {
         }
 
         // Copy to char array data from server:
-        memcpy(&ack_packet, (ACK_packet_t*)server_message, BUF_SIZE);
+        memcpy(&ack_packet, (ACK_packet_t*)server_message, sizeof(ACK_packet_t));
         
         // Check recieved data:
         if (ack_packet.hash>>30 != TYPE_ACK || ack_packet.state != 1) {
