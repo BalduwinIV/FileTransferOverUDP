@@ -14,6 +14,8 @@
 #define     TYPE_SYNC           3
 #define     TYPE_ACK            1
 
+#define     ONE_SEC             1
+
 void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest_port, char* filename) {
     int socket_desc;
     struct sockaddr_in server_addr;
@@ -73,7 +75,7 @@ void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest
     ack_packet.hash = 0;
     ack_packet.state = 0;
 
-    while (ack_packet.hash>>30 != TYPE_ACK || ack_packet.state == 0) {
+    while (ack_packet.hash>>30 != TYPE_ACK || ack_packet.state != 1) {
         if(send(socket_desc, client_message, strlen(client_message), 0) < 0){
             printf("Unable to send message\n");
             exit(-1);
@@ -86,6 +88,10 @@ void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest
         }
 
         memcpy(&ack_packet, (ACK_packet_t*)server_message, BUF_SIZE);
+
+        if (ack_packet.hash>>30 != TYPE_ACK || ack_packet.state != 1) {
+            sleep(ONE_SEC);
+        }
     }
     
     FILE* file = fopen(filename, "rb");
@@ -109,6 +115,8 @@ void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest
             printf("Unable to send message\n");
             exit(-1);
         }
+        
+        sleep(ONE_SEC);
     }
     fclose(file);
     
