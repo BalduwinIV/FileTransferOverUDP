@@ -96,12 +96,13 @@ void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest
 
     // Send the message to server:
     DATA_packet_t data_packet;
-    data_packet.packet_n = ack_packet.packet_n;
+    data_packet.packet_n = 0;
     while (!feof(file)) {
         fread(data_packet.data, sizeof(char), DATA_SIZE, file);
         data_packet.hash = 0;
         data_packet.CRC = 0;
         data_packet.CRC_remainder = 0;
+        data_packet.packet_n++;
 
         memcpy(client_message, (char*)&data_packet, BUF_SIZE);
         if(send(socket_desc, client_message, strlen(client_message), 0) < 0){
