@@ -141,13 +141,13 @@ void send_DATA_packet(int socket_desc, char* filename) {
         data_packet.hash = 0;   // Hash 
         data_packet.CRC = 0;          // and CRC                   
         data_packet.CRC_remainder = 0;         // recuired!!!
-        data_packet.packet_n++;
 
         memcpy(client_message, (char*)&data_packet, BUF_SIZE);
         if(send(socket_desc, client_message, strlen(client_message), 0) < 0){
             printf("Unable to send message\n");
             exit(ERROR);
         }
+        data_packet.packet_n++;
         
         sleep(ONE_SEC);
     }
