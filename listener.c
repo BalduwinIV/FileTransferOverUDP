@@ -22,13 +22,13 @@ void start_listener(char *ip_addr, int port);
 void start_daemon() {
     pid_t process_id;
     pid_t sid;
-    process_id = fork();
+    process_id = fork(); /* Starting child process. */
     if (process_id < 0) {
         fprintf(stderr, "Error starting daemon...\n");
         exit(ERROR_DAEMON);
     } else if (process_id > 0) {
         printf("(%d) Daemon started.\n", process_id);
-        FILE *pid_database = fopen("daemons.data", "ab");
+        FILE *pid_database = fopen("daemons.data", "ab"); /* Save process_id to kill it later. */ 
         fputc(process_id & 0xff, pid_database);
         fputc((process_id >> 8) & 0xff, pid_database);
         fputc((process_id >> 16) & 0xff, pid_database);
@@ -36,7 +36,7 @@ void start_daemon() {
         fclose(pid_database);
     }
 
-    umask(0);
+    umask(0); /* Reset file mode creation mask. */
 
     sid = setsid();
     if (sid < 0) {
@@ -54,7 +54,7 @@ void start_listener(char *ip_addr, int port) {
     char client_message[BUF_SIZE];
     unsigned int client_message_length = sizeof(client_addr);
 
-    memset(client_message, '\0', BUF_SIZE);
+    memset(client_message, '\0', BUF_SIZE); /* Clean buffer. */
 
     server_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (server_socket < 0) {
@@ -83,7 +83,7 @@ void start_listener(char *ip_addr, int port) {
 
     while (1) {
         if (recvfrom(server_socket, client_message, sizeof(client_message), 0, (struct sockaddr *)&client_addr, &client_message_length) < 0) {
-            fprintf(stderr, "Something goes wrong... Interrupting.\n");
+            fprintf(stderr, "Something went wrong... Interrupting.\n");
             exit(ERROR_RECEIVE);
         }
 
@@ -95,17 +95,18 @@ void start_listener(char *ip_addr, int port) {
 }
 
 void stop_listeners() {
-    FILE *pid_database = fopen("daemons.data", "r");
+    FILE *pid_database = fopen("daemons.data", "rb");
     if (!pid_database) {
         fprintf(stderr, "No processes to stop. Interrupting.\n");
         exit(SUCCESS_CODE);
     }
 
     long int process_id;
+    unsigned char byte = fgetc(pid_database);
     while (!feof(pid_database)) {
-        process_id = fgetc(pid_database) + (fgetc(pid_database) << 8) + (fgetc(pid_database) << 16) + (fgetc(pid_database) << 24);
-        for (int i = 0; i < 10; i++) {
-            if (kill(process_id, SIGKILL) == 0) {
+        process_id = byte + (fgetc(pid_database) << 8) + (fgetc(pid_database) << 16) + (fgetc(pid_database) << 24);
+        for (int i = 0; i < 5; i++) {
+            if (kill(process_id, SIGTERM) == 0) {
                 printf("Process %ld has been terminated.\n", process_id);
                 break;
             } else {
@@ -114,6 +115,7 @@ void stop_listeners() {
             }
 
         }
+        byte = fgetc(pid_database);
     }
     fclose(pid_database);
     remove("daemons.data");
