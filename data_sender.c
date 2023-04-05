@@ -48,6 +48,10 @@ int main (int argc, char **argv) {
         start_listener(local_ip_addr, local_port);
     } else if (operation == STOP) {
         stop_listeners();
+    } else if (operation == SEND_DATA) {
+        // TODO
+    } else if (operation == USAGE) {
+        /* Print help information. */
     }
     return SUCCESS_CODE;
 }
