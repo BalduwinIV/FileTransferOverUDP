@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
+#include <libgen.h>
 
 #include "packets.h"
 #include "tools.h"
@@ -207,8 +208,7 @@ SYNC_packet_t * parse_SYNC_packet(unsigned char *client_message, struct sockaddr
 }
 
 void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet, uint32_t file_hash) {
-    sync_packet->filename[2] = '\0';
-    data_owner->file = fopen(sync_packet->filename, "wb");
+    data_owner->file = fopen(basename(sync_packet->filename), "wb");
     if (!data_owner->file) {
         fprintf(stderr, "(listener) Error opening file. Interrupting.\n");
         exit(ERROR_FOPEN);
