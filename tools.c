@@ -70,7 +70,7 @@ void parse_args(int argc, char **argv, char **local_ip_addr, int *local_port, ch
                     exit(ERROR_NO_FILE);
                 }
                 *operation = SEND;
-            } else if (strcmp("--help", argv[i]) == 0) {
+            } else if (strcmp("--help", argv[i]) == 0 || strcmp("--usage", argv[i]) == 0) {
                 *operation = HELP;
             }
         }

@@ -6,9 +6,11 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <time.h>
 
 #include "tools.h"
 #include "packets.h"
+#include "crc.h"
 
 #define     BUF_SIZE            1024
 
@@ -18,6 +20,9 @@
 #define     ONE_SEC             1
 
 #define     ERROR               -1
+
+#define     CONFIRM_CODE        0xff
+#define     NEGATIVE_CODE       0x00
 
 void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest_port, char* filename);
 void set_ports_and_ip(struct sockaddr_in* client_addr, struct sockaddr_in* server_addr, 
@@ -29,10 +34,10 @@ void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest
     // Create socket:
     int socket_desc = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if(socket_desc < 0){
-        printf("(sender) Unable to create socket\n");
+        printf("Unable to create socket\n");
         exit(ERROR);
     }
-    printf("(sender) Socket created successfully\n");
+    printf("Socket created successfully\n");
     
     // Set local and server's port and IP:
     struct sockaddr_in client_addr;
@@ -41,17 +46,17 @@ void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest
     
     // Bind to the set port and IP:
     if(bind(socket_desc, (struct sockaddr*)&client_addr, sizeof(client_addr)) < 0){
-        printf("(sender) Couldn't bind to the port\n");
+        printf("Couldn't bind to the port\n");
         exit(ERROR);
     }
-    printf("(sender) Done with binding\n");
+    printf("Done with binding\n");
     
     // Send connection request to server:
     if(connect(socket_desc, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0){
-        printf("(sender) Unable to connect\n");
+        printf("Unable to connect\n");
         exit(ERROR);
     }
-    printf("(sender) Connected with server successfully\n");
+    printf("Connected with server successfully\n");
 
     int file_hash;
 
@@ -97,14 +102,14 @@ void send_SYNC_packet(int socket_desc, int local_port, char* filename, int *file
     while (true) {
         // Send messege to server:
         if(send(socket_desc, client_message, sizeof(SYNC_packet_t), 0) < 0){
-            printf("(sender) Unable to send message, trying again!\n");
+            printf("Unable to send message, trying again!\n");
             sleep(ONE_SEC);
             continue;
         }
 
         // Receive the server's response:
         if(recv(socket_desc, server_message, sizeof(server_message), 0) < 0){
-            printf("(sender) Error while receiving server's msg\n");
+            printf("Error while receiving server's msg\n");
             exit(ERROR);
         }
 
@@ -113,11 +118,11 @@ void send_SYNC_packet(int socket_desc, int local_port, char* filename, int *file
         
         // Check recieved data:
         if (ack_packet.type != TYPE_ACK || ack_packet.state <= 0x40) {
-            printf("(sender) Something went wrong. Trying to send the first package again\n");
+            printf("Something went wrong. Trying to send the first package again\n");
             sleep(ONE_SEC);
         } else {
-            printf("(sender) The first package was received successfully!\n");
-            printf("(sender) (ACK) hash = %d\n", ack_packet.hash & 0x3fffffff);
+            printf("The first package was received successfully!\n");
+            printf("(ACK) hash = %d\n", ack_packet.hash & 0x3fffffff);
 
             *file_hash = ack_packet.hash & 0x3fffffff;
             break;
@@ -129,7 +134,7 @@ void send_DATA_packet(int socket_desc, char* filename, int file_hash) {
     // Open file stream:
     FILE* file = fopen(filename, "rb");
     if (file == NULL) {
-        printf("(sender) Error opening file");
+        printf("Error opening file");
         exit(ERROR);
     }
 
@@ -137,6 +142,8 @@ void send_DATA_packet(int socket_desc, char* filename, int file_hash) {
     DATA_packet_t data_packet;
 
     ACK_packet_t ack_packet;
+
+    struct timespec remaining, request = {0, 1000000};
 
     // Read file's data and send to server:
     data_packet.packet_n = 0;
@@ -147,23 +154,30 @@ void send_DATA_packet(int socket_desc, char* filename, int file_hash) {
             data_packet.packet_n |= 0x80000000;
         }
         data_packet.hash = file_hash;   // Hash 
-        data_packet.CRC = 0;          // and CRC                   
-        data_packet.CRC_remainder = 0;         // recuired!!!
+        data_packet.CRC = 0b00001011;          // and CRC                   
+        data_packet.CRC_remainder = calculate_crc(data_packet.data, data_packet.data_length, data_packet.CRC);         // recuired!!!
 
         if(send(socket_desc, (unsigned char*)&data_packet, sizeof(DATA_packet_t), 0) < 0){
-            printf("(sender) Unable to send message\n");
+            printf("Unable to send message\n");
             exit(ERROR);
         }
+        /* printf("Send packet number %d.\n", data_packet.packet_n); */
         data_packet.packet_n++;
 
         if(recv(socket_desc, &ack_packet, sizeof(ACK_packet_t), 0) < 0){
-            printf("(sender) Error while receiving server's msg\n");
+            printf("Error while receiving server's msg\n");
             exit(ERROR);
         }
-        printf("(sender) (ACK[%d]) hash = %d\n", ack_packet.packet_n, ack_packet.hash);
-        printf("(sender) (ACK[%d]) state = %d\n", ack_packet.packet_n, ack_packet.state);
+        if (ack_packet.state == NEGATIVE_CODE) {
+            printf("NEGATIVE_CODE PACKET.\n");
+
+            /* TODO: send package again to listener. */
+
+        }
+        /* printf("(ACK[%d]) state = %d\n", ack_packet.packet_n, ack_packet.state); */
+        nanosleep(&request, &remaining);
     }
-    printf("(sender) All data has been successfully sent!\n");
+    printf("All data has been successfully sent!\n");
     // Close file stream:
     fclose(file);
 }

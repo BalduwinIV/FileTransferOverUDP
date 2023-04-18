@@ -9,9 +9,11 @@
 #include <time.h>
 #include <libgen.h>
 
+#include "logger.h"
 #include "packets.h"
 #include "tools.h"
 #include "data_queue.h"
+#include "crc.h"
 
 #define     SUCCESS_CODE        0
 
@@ -38,26 +40,146 @@
 #define     CONFIRM_CODE        0xff
 #define     NEGATIVE_CODE       0x00
 
-void start_daemon();
-void start_listener(char *ip_addr, int port);
-SYNC_packet_t * parse_SYNC_packet(unsigned char *client_message, struct sockaddr_in *client_addr, FILE *log_file);
-void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet, uint32_t file_hash);
+static char listener_logger[] = "listener.log";
 
-void start_daemon() {
+static void start_daemon();
+static SYNC_packet_t * parse_SYNC_packet(unsigned char *client_message, struct sockaddr_in *client_addr);
+static void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet, uint32_t file_hash);
+
+void start_listener(char *ip_addr, int port) {
+    int server_socket;
+    struct sockaddr_in server_addr, client_addr;
+    unsigned char client_message[BUF_SIZE];
+    unsigned int client_message_length = sizeof(client_addr);
+    char log_msg[256];
+
+    start_logging(listener_logger);
+
+    /* Clean buffer. */
+    memset(client_message, '\0', BUF_SIZE);
+
+    /* Create socket. */
+    server_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (server_socket < 0) {
+        error(listener_logger, "An error occurred while creating socket.");
+        exit(ERROR_SOCKET);
+    }
+    info(listener_logger, "Socket has been created successfully.");
+
+    sprintf(log_msg, "Setting up server address:\n\tIP = %s\n\tport = %d", ip_addr, port);
+    info(listener_logger, log_msg);
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port);
+    server_addr.sin_addr.s_addr = inet_addr(ip_addr);
+
+    info(listener_logger, "Binding the socket and IP.");
+    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        error(listener_logger, "An error occurred while binding the port and IP.");
+        exit(ERROR_BIND);
+    }
+    info(listener_logger, "Binding is done.");
+
+    info(listener_logger, "Starting listening...");
+    fprintf(stderr, "Starting listening...\n");
+
+    DATA_file_t *data_owner = safe_malloc(sizeof(DATA_file_t));
+    DATA_packet_t data_packet;
+    ACK_packet_t ack_packet;
+    srand(time(NULL));
+
+    _Bool continue_listening = 1;
+
+    while (continue_listening) {
+        if (recvfrom(server_socket, client_message, sizeof(client_message), 0, (struct sockaddr *)&client_addr, &client_message_length) < 0) {
+            error(listener_logger, "Error accepting packet... Interrupting.");
+            exit(ERROR_RECEIVE);
+        }
+        sprintf(log_msg, "Packet from %s:%d.", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+        info(listener_logger, log_msg);
+
+        if (client_message[0] == TYPE_SYNC) {
+            info(listener_logger, "Packet type: SYNC.");
+            SYNC_packet_t *sync_packet = parse_SYNC_packet(client_message, &client_addr);
+    
+            ack_packet.type = TYPE_ACK;
+            ack_packet.hash = rand();
+            ack_packet.packet_n = 0;
+            ack_packet.state = CONFIRM_CODE;
+
+            if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
+                error(listener_logger, "Unable to send ACK message.");
+            } else {
+                info(listener_logger, "ACK message has been sent successfully.");
+            }
+
+            setup_data_file(data_owner, sync_packet, ack_packet.hash);
+
+            free(sync_packet);
+        } else if (client_message[0] == TYPE_DATA) {
+            memcpy(&data_packet, client_message, sizeof(DATA_packet_t));
+
+            info(listener_logger, "Packet type: DATA.");
+            sprintf(log_msg, "(DATA[%d]) hash = %d", data_packet.packet_n & 0x7fffffff, data_packet.hash & 0x3fffffff);
+            info(listener_logger, log_msg);
+            sprintf(log_msg, "(DATA[%d]) CRC = %d", data_packet.packet_n & 0x7fffffff, data_packet.CRC);
+            info(listener_logger, log_msg);
+            sprintf(log_msg, "(DATA[%d]) CRC_remainder = %d", data_packet.packet_n & 0x7fffffff, data_packet.CRC_remainder);
+            info(listener_logger, log_msg);
+            sprintf(log_msg, "(DATA[%d]) data_length = %d", data_packet.packet_n & 0x7fffffff, data_packet.data_length);
+            info(listener_logger, log_msg);
+
+            ack_packet.type = TYPE_ACK;
+            ack_packet.hash = data_owner->file_hash;
+            ack_packet.packet_n = data_packet.packet_n;
+
+            if (calculate_crc(data_packet.data, data_packet.data_length, data_packet.CRC) == data_packet.CRC_remainder) {
+                ack_packet.state = CONFIRM_CODE;
+                info(listener_logger, "No problems has been detected while sending a packet.");
+                fwrite(data_packet.data, sizeof(char), data_packet.data_length, data_owner->file);
+            } else {
+                ack_packet.state = NEGATIVE_CODE;
+                warning(listener_logger, "Packet information has been corrupted. Waiting for the sender response.");
+            }
+
+            info(listener_logger, "Sending ACK response...");
+            if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
+                error(listener_logger, "Unable to send ACK message.\n");
+            } else {
+                info(listener_logger, "ACK message has been sent successfully.\n");
+            }
+
+            if (data_packet.packet_n & 0x80000000) {
+                info(listener_logger, "Last packet.");
+                fclose(data_owner->file);
+                continue_listening = 0;
+            }
+        }
+    }
+    stop_logging();
+}
+
+static void start_daemon() {
     pid_t process_id;
     pid_t sid;
     process_id = fork(); /* Starting child process. */
     if (process_id < 0) {
-        fprintf(stderr, "(listener) Error starting daemon...\n");
+        error(listener_logger, "Error starting daemon...");
         exit(ERROR_DAEMON);
     } else if (process_id > 0) {
-        printf("(listener) (%d) Daemon started.\n", process_id);
+        char log_msg[200];
+        sprintf(log_msg, "(%d) Daemon started.", process_id);
+        info(listener_logger, log_msg);
+
         FILE *pid_database = fopen("daemons.data", "ab"); /* Save process_id to kill it later. */ 
+        if (!pid_database) {
+            error(listener_logger, "An error occurred while opening \"daemons.data\" file.");
+        }
         fputc(process_id & 0xff, pid_database);
         fputc((process_id >> 8) & 0xff, pid_database);
         fputc((process_id >> 16) & 0xff, pid_database);
         fputc((process_id >> 24) & 0xff, pid_database);
         fclose(pid_database);
+        info(listener_logger, "Process number has been written to \"daemons.data\" file.");
     }
 
     umask(0); /* Reset file mode creation mask. */
@@ -72,119 +194,32 @@ void start_daemon() {
 
 }
 
-void start_listener(char *ip_addr, int port) {
-    int server_socket;
-    struct sockaddr_in server_addr, client_addr;
-    unsigned char client_message[BUF_SIZE];
-    unsigned int client_message_length = sizeof(client_addr);
-
-    /* Clean buffer. */
-    memset(client_message, '\0', BUF_SIZE);
-
-    /* Create socket. */
-    server_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (server_socket < 0) {
-        fprintf(stderr, "(listener) An error occurred while creating socket.\n");
-        exit(ERROR_SOCKET);
-    }
-    printf("(listener) Socket has been created successfully.");
-
-    printf("(listener) Setting up server address:\n\tIP = %s\n\tport = %d\n", ip_addr, port);
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-    server_addr.sin_addr.s_addr = inet_addr(ip_addr);
-
-    printf("(listener) Binding the socket and IP.\n");
-    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        fprintf(stderr, "(listener) An error occurred while binding the port and IP.\n");
-        exit(ERROR_BIND);
-    }
-    printf("(listener) Binding is done.\n");
-
-    start_daemon();
-
-    printf("(listener) Starting listening...\n");
-
-    DATA_file_t *data_owner = safe_malloc(sizeof(DATA_file_t));
-    DATA_packet_t data_packet;
-    ACK_packet_t ack_packet;
-    srand(time(NULL));
-
-    while (1) {
-        if (recvfrom(server_socket, client_message, sizeof(client_message), 0, (struct sockaddr *)&client_addr, &client_message_length) < 0) {
-            fprintf(stderr, "(listener) Something went wrong... Interrupting.\n");
-            exit(ERROR_RECEIVE);
-        }
-        fprintf(stderr, "\n(listener) Packet from %s:%d.\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-
-        if (client_message[0] == TYPE_SYNC) {
-            fprintf(stderr, "(listener) \tPacket type: SYNC.\n");
-            SYNC_packet_t *sync_packet = parse_SYNC_packet(client_message, &client_addr, stderr);
-    
-            ack_packet.type = TYPE_ACK;
-            ack_packet.hash = rand();
-            ack_packet.packet_n = 0;
-            ack_packet.state = CONFIRM_CODE;
-
-            if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
-                fprintf(stderr, "(listener) \tUnable to send ACK message.\n");
-            } else {
-                fprintf(stderr, "(listener) \tACK message has been sent successfully.\n");
-            }
-
-            setup_data_file(data_owner, sync_packet, ack_packet.hash);
-
-            free(sync_packet);
-        } else if (client_message[0] == TYPE_DATA) {
-            memcpy(&data_packet, client_message, sizeof(DATA_packet_t));
-
-            fprintf(stderr, "(listener) \tPacket type: DATA.\n");
-            fprintf(stderr, "(listener) \t(DATA[%d]) hash = %d\n", data_packet.packet_n & 0x7fffffff, data_packet.hash & 0x3fffffff);
-            fprintf(stderr, "(listener) \t(DATA[%d]) CRC = %d\n", data_packet.packet_n & 0x7fffffff, data_packet.CRC);
-            fprintf(stderr, "(listener) \t(DATA[%d]) CRC_remainder = %d\n", data_packet.packet_n & 0x7fffffff, data_packet.CRC_remainder);
-            fprintf(stderr, "(listener) \t(DATA[%d]) data_length = %d\n", data_packet.packet_n & 0x7fffffff, data_packet.data_length);
-
-            fwrite(data_packet.data, sizeof(char), data_packet.data_length, data_owner->file);
-
-            if (data_packet.packet_n & 0x80000000) {
-                fprintf(stderr, "(listener) \tLast packet.\n");
-                fclose(data_owner->file);
-            }
-
-            ack_packet.type = TYPE_ACK;
-            ack_packet.hash = data_owner->file_hash;
-            ack_packet.packet_n = data_packet.packet_n;
-            ack_packet.state = CONFIRM_CODE;
-
-            fprintf(stderr, "(listener) Sending ACK response...\n");
-            if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
-                fprintf(stderr, "(listener) Unable to send ACK message.\n");
-            } else {
-                fprintf(stderr, "(listener) ACK message has been sent successfully.\n");
-            }
-        }
-
-    }
-}
 
 void stop_listeners() {
     FILE *pid_database = fopen("daemons.data", "rb");
     if (!pid_database) {
-        fprintf(stderr, "No processes to stop. Interrupting.\n");
+        info(listener_logger, "No processes to stop. Interrupting.");
         exit(SUCCESS_CODE);
     }
 
+    char log_msg[200];
     long int process_id;
     unsigned char byte = fgetc(pid_database);
     while (!feof(pid_database)) {
         process_id = byte + (fgetc(pid_database) << 8) + (fgetc(pid_database) << 16) + (fgetc(pid_database) << 24);
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 3; i++) {
             if (kill(process_id, SIGTERM) == 0) {
-                printf("Process %ld has been terminated.\n", process_id);
+                sprintf(log_msg, "Process %ld has been terminated.", process_id);
                 break;
             } else {
-                printf("Process %ld has not been terminated.\n Trying again.\n", process_id);
-                sleep(1);
+                if (i <= 1) {
+                    sprintf(log_msg, "Process %ld has not been terminated.\n Trying again.", process_id);
+                    error(listener_logger, log_msg);
+                    sleep(1);
+                } else {
+                    sprintf(log_msg, "Unable to terminate process %ld.", process_id);
+                    error(listener_logger, log_msg);
+                }
             }
 
         }
@@ -194,11 +229,51 @@ void stop_listeners() {
     remove("daemons.data");
 }
 
-SYNC_packet_t * parse_SYNC_packet(unsigned char *client_message, struct sockaddr_in *client_addr, FILE *log_file) {
+static SYNC_packet_t * parse_SYNC_packet(unsigned char *client_message, struct sockaddr_in *client_addr) {
     SYNC_packet_t *sync_packet = (SYNC_packet_t *)safe_malloc(sizeof(SYNC_packet_t));
     memcpy(sync_packet, client_message, sizeof(SYNC_packet_t));
+    char log_msg[200];
 
-    fprintf(log_file, "(listener) Filename = %s\n", sync_packet->filename);
+    sprintf(log_msg, "Filename = %s", sync_packet->filename);
+    info(listener_logger, log_msg);
+    if (access(sync_packet->filename, F_OK) == 0) {
+        warning(listener_logger, "This file does already exists.");
+        char new_filename[80];
+        uint8_t str_i;
+        for (int f_index = 0; f_index < 100; f_index++) {
+            strcpy(new_filename, sync_packet->filename);
+            str_i = 0;
+            while (sync_packet->filename[str_i] != '.' && sync_packet->filename[str_i] != '\0') {
+                str_i++;
+            }
+
+            new_filename[str_i] = '(';
+            new_filename[str_i+1] = (f_index / 10) + '0';
+            new_filename[str_i+2] = (f_index % 10) + '0';
+            new_filename[str_i+3] = ')';
+
+            while (sync_packet->filename[str_i] != '\0') {
+                new_filename[str_i+4] = sync_packet->filename[str_i];
+                str_i++;
+            }
+
+            new_filename[str_i+4] = '\0';
+
+            sprintf(log_msg, "Trying to create file \"%s\".", new_filename);
+            warning(listener_logger, log_msg);
+            
+            if (access(new_filename, F_OK) == 0) {
+                sprintf(log_msg, "File \"%s\" already exists.", new_filename);
+                if (f_index == 99) {
+                    sprintf(log_msg, "Could not create file \"%s\".", new_filename);
+                }
+            } else {
+                strcpy(sync_packet->filename, new_filename);
+                sprintf(log_msg, "File \"%s\" has been successfully created.", new_filename);
+                break;
+            }
+        }
+    }
 
     client_addr->sin_family = AF_INET;
     client_addr->sin_addr.s_addr = inet_addr(inet_ntoa(client_addr->sin_addr));
@@ -207,10 +282,10 @@ SYNC_packet_t * parse_SYNC_packet(unsigned char *client_message, struct sockaddr
     return sync_packet;
 }
 
-void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet, uint32_t file_hash) {
+static void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet, uint32_t file_hash) {
     data_owner->file = fopen(basename(sync_packet->filename), "wb");
     if (!data_owner->file) {
-        fprintf(stderr, "(listener) Error opening file. Interrupting.\n");
+        error(listener_logger, "Error opening file. Interrupting.");
         exit(ERROR_FOPEN);
     }
     data_owner->file_hash = file_hash;

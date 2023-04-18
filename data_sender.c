@@ -7,6 +7,7 @@
 #include <signal.h>
 #include <unistd.h>
 
+#include "logger.h"
 #include "packets.h"
 #include "usage.h"
 #include "tools.h"
@@ -48,7 +49,6 @@ int main (int argc, char **argv) {
     dest_port = -1;
     operation = 0;
 
-    printf("Parsing arguments...\n");
     parse_args(argc, argv, &local_ip_addr, &local_port, &dest_ip_addr, &dest_port, &filename, &operation);
 
     if (operation == LISTEN) {
@@ -60,6 +60,7 @@ int main (int argc, char **argv) {
     } else if (operation == HELP) {
         print_usage();
     }
+
     return SUCCESS_CODE;
 }
 
