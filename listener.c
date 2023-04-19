@@ -135,7 +135,20 @@ void start_listener(char *ip_addr, int port) {
             if (calculate_crc(data_packet.data, data_packet.data_length, data_packet.CRC) == data_packet.CRC_remainder) {
                 ack_packet.state = CONFIRM_CODE;
                 info(listener_logger, "No problems has been detected while sending a packet.");
-                fwrite(data_packet.data, sizeof(char), data_packet.data_length, data_owner->file);
+
+                if (data_packet.packet_n == data_owner->packet_n) {
+                    fwrite(data_packet.data, sizeof(char), data_packet.data_length, data_owner->file);
+                    data_owner->packet_n++;
+                } else {
+                    sprintf(log_msg, "Repeated packet: %d.\n", data_owner->packet_n-1);
+                    warning(listener_logger, log_msg);
+                }
+
+                if (data_packet.packet_n & 0x80000000) {
+                    info(listener_logger, "Last packet.");
+                    fclose(data_owner->file);
+                    continue_listening = 0;
+                }
             } else {
                 ack_packet.state = NEGATIVE_CODE;
                 warning(listener_logger, "Packet information has been corrupted. Waiting for the sender response.");
@@ -146,12 +159,6 @@ void start_listener(char *ip_addr, int port) {
                 error(listener_logger, "Unable to send ACK message.\n");
             } else {
                 info(listener_logger, "ACK message has been sent successfully.\n");
-            }
-
-            if (data_packet.packet_n & 0x80000000) {
-                info(listener_logger, "Last packet.");
-                fclose(data_owner->file);
-                continue_listening = 0;
             }
         }
     }
