@@ -7,7 +7,7 @@
 #define     ERROR_FOPEN         200
 
 typedef struct DATA_file_t {
-    uint32_t file_hash;
+    unsigned char *file_hash;
     FILE *file;
     uint32_t packet_n;
     uint32_t max_packet_n;

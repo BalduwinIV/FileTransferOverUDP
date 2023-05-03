@@ -10,7 +10,9 @@ void print_usage() {
     printf("\t--port=LOCAL_PORT\t\t\tDefines the port that will be open for data transfering.\n");
     printf("\t--dest_ip=TARGET_IP\t\t\tSets the ip adress of a user, who will receive data.\n");
     printf("\t--dest_port=TARGET_PORT\t\t\tDefines the port of a user, who will receive data.\n");
-    printf("\t--filename=FILENAME\t\t\t\tDefines the name of file, that yo want to send.\n\n");
+    printf("\t--CRC=CRC_CODE\t\t\t\tDefines CRC code by number (1101 for CRC-3, for example).\n");
+    printf("\t--n=PACKETS_BUFFER_SIZE\t\t\tDefines size of packets buffer.\n");
+    printf("\t--filename=FILENAME\t\t\t\Defines the name of file, that yo want to send.\n\n");
     printf("commands:\n");
     printf("\tdata_sender --ip=LOCAL_IP --port=LOCAL_PORT listen\n\t\t\t\t\t\tStart listening.\n");
     printf("\tdata_sender stop\n\t\t\t\t\t\tStop listening.\n");

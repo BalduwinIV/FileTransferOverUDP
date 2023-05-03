@@ -11,7 +11,7 @@ $(OBJS): %.o: %.c
 	$(CC) -c $< $(CFLAGS) $(CPPFLAGS) -o $@
 
 $(TARGET): $(OBJS)
-	$(CC) $(OBJS) $(LDFLAGS) -o $@
+	$(CC) -g $(OBJS) $(LDFLAGS) -o $@ -I /usr/local/opt/openssl/include -L /usr/local/opt/openssl/lib -lcrypto
 
 clean:
 	$(RM) $(OBJS) $(TARGET)
