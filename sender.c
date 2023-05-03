@@ -178,46 +178,69 @@ void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash,
     fd_set read_fds;
     struct timeval tv;
 
+    char control_list[10];
+    memset(control_list, 0, sizeof(control_list));
+    int curr_pos = 0;
+    int sent_n = 0;
+
     data_packet.packet_n = 0;
+    data_packet.type = TYPE_DATA;
     while (!feof(file)) {
-        data_packet.type = TYPE_DATA;
-        data_packet.data_length = fread(&data_packet.data, sizeof(char), sizeof(data_packet.data), file);
-        if (feof(file)) {
-            data_packet.packet_n |= 0x80000000;
-        }
-        memcpy(data_packet.hash, file_hash, SHA256_DIGEST_LENGTH);
-        data_packet.CRC = CRC;          // and CRC                   
-        data_packet.CRC_remainder = calculate_crc(data_packet.data, data_packet.data_length, data_packet.CRC); // recuired!!!
         
+
+        for(int i = 0; i < 10; i++){ //TODOOOOOOOOOO
+            if(control_list[i] == 1){
+                info(sender_logger, "work");
+                fseek(file, ((sent_n/10)*10+i)*sizeof(data_packet.data), SEEK_SET);
+                sent_n++;
+                if(sent_n%10 == 0){
+                    memset(control_list, 0, sizeof(control_list));
+                    break;
+                }
+            }
+            if(control_list[i] == 0){
+                data_packet.packet_n = (sent_n/10)*10+i;
+                data_packet.data_length = fread(&data_packet.data, sizeof(char), sizeof(data_packet.data), file);
+                if (feof(file)) {
+                    data_packet.packet_n |= 0x80000000;
+                }
+                memcpy(data_packet.hash, file_hash, SHA256_DIGEST_LENGTH);
+                data_packet.CRC = CRC;          // and CRC                   
+                data_packet.CRC_remainder = calculate_crc(data_packet.data, data_packet.data_length, data_packet.CRC); // recuired!!!
+                
+                info(sender_logger, "Sending DATA response...");
+
+                sprintf(log_msg, "(DATA[%d]) hash = %s", data_packet.packet_n & 0x7fffffff, data_packet.hash);
+                info(sender_logger, log_msg);
+                sprintf(log_msg, "(DATA[%d]) CRC = %d", data_packet.packet_n & 0x7fffffff, data_packet.CRC);
+                info(sender_logger, log_msg);
+                sprintf(log_msg, "(DATA[%d]) CRC_remainder = %d", data_packet.packet_n & 0x7fffffff, data_packet.CRC_remainder);
+                info(sender_logger, log_msg);
+                sprintf(log_msg, "(DATA[%d]) data_length = %d", data_packet.packet_n & 0x7fffffff, data_packet.data_length);
+                info(sender_logger, log_msg);
+
+                if(send(socket_desc, (unsigned char*)&data_packet, sizeof(DATA_packet_t), 0) < 0){
+                    error(sender_logger, "Unable to send DATA message. Skipping.");
+                    sleep(1);
+                    continue;
+                }
+                info(sender_logger, "DATA message has been sent successfully.");
+                
+
+            }
+        }
+        
+        // send n(10) packets and check response
+        
+        // waiting time (5 sec)
+        tv.tv_sec = 1;
+        tv.tv_usec = 0;
+
+        FD_ZERO(&read_fds);
+        FD_SET(socket_desc, &read_fds);
+
+        info(sender_logger, "Waiting for ACK responses.");
         while(true){
-            info(sender_logger, "Sending DATA response...");
-
-            sprintf(log_msg, "(DATA[%d]) hash = %s", data_packet.packet_n & 0x7fffffff, data_packet.hash);
-            info(sender_logger, log_msg);
-            sprintf(log_msg, "(DATA[%d]) CRC = %d", data_packet.packet_n & 0x7fffffff, data_packet.CRC);
-            info(sender_logger, log_msg);
-            sprintf(log_msg, "(DATA[%d]) CRC_remainder = %d", data_packet.packet_n & 0x7fffffff, data_packet.CRC_remainder);
-            info(sender_logger, log_msg);
-            sprintf(log_msg, "(DATA[%d]) data_length = %d", data_packet.packet_n & 0x7fffffff, data_packet.data_length);
-            info(sender_logger, log_msg);
-            if(send(socket_desc, (unsigned char*)&data_packet, sizeof(DATA_packet_t), 0) < 0){
-                error(sender_logger, "Unable to send DATA message. Trying to send again");
-                sleep(1);
-                continue;
-            }
-            info(sender_logger, "DATA message has been sent successfully.");
-            if((data_packet.packet_n & 0x7fffffff)%10 < 10){
-                break;
-            }
-
-            // waiting time (5 sec)
-            tv.tv_sec = 3;
-            tv.tv_usec = 0;
-
-            FD_ZERO(&read_fds);
-            FD_SET(socket_desc, &read_fds);
-
-            info(sender_logger, "Waiting for ACK response.");
             if(select(socket_desc+1, &read_fds, NULL, NULL, &tv) > 0){
                 if(FD_ISSET(socket_desc, &read_fds)){
                     if(recv(socket_desc, &ack_packet, sizeof(ACK_packet_t), 0) < 0){
@@ -229,15 +252,17 @@ void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash,
                     }
                     if(ack_packet.state == CONFIRM_CODE) {
                         info(sender_logger, "The DATA packet was received successfully.\n");
-                        break;
+                        control_list[(ack_packet.packet_n & 0x7fffffff)%10] = 1;
                     }
                 }
             } else {
                 warning(sender_logger, "TIMEOUT! Sending the DATA again.\n");
+                break;
             }
         }
+
         
-        data_packet.packet_n++;
+
         nanosleep(&request, &remaining);
     }
     // Close file stream:
