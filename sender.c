@@ -235,7 +235,7 @@ void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash,
         
         // waiting time (5 sec)
         tv.tv_sec = 0;
-        tv.tv_usec = 1000;
+        tv.tv_usec = 100000;
 
         FD_ZERO(&read_fds);
         FD_SET(socket_desc, &read_fds);
