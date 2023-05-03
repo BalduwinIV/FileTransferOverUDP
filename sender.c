@@ -204,8 +204,10 @@ void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash,
                 error(sender_logger, "Unable to send DATA message. Trying to send again");
                 sleep(1);
                 continue;
-            } else {
-                info(sender_logger, "DATA message has been sent successfully.");
+            }
+            info(sender_logger, "DATA message has been sent successfully.");
+            if((data_packet.packet_n & 0x7fffffff)%10 < 10){
+                break;
             }
 
             // waiting time (5 sec)
