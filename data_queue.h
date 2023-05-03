@@ -31,14 +31,14 @@ DATA_queue_t * init_DATA_queue();
  * @param filename      Name of file to add.
  * @param file_hash     That files hash.
  * */
-void add_file(DATA_queue_t *data_queue, char *filename, int file_hash);
+void add_file(DATA_queue_t *data_queue, char *filename, unsigned char *file_hash);
 
 /*
  * Remove file from queue.
  * @param data_queue    Queue from which file should be removed.
  * @param file_hash     Files hash.
  * */
-void remove_file(DATA_queue_t *data_queue, uint32_t file_hash);
+void remove_file(DATA_queue_t *data_queue, unsigned char *file_hash);
 
 /*
  * Find file by its hash.
@@ -46,7 +46,7 @@ void remove_file(DATA_queue_t *data_queue, uint32_t file_hash);
  * @param file_hash     Files hash.
  * @returns Looked files structure or NULL, if file has not been found.
  * */
-DATA_file_t * find_file_by_hash(DATA_queue_t *data_queue, uint32_t file_hash);
+DATA_file_t * find_file_by_hash(DATA_queue_t *data_queue, unsigned char *file_hash);
 
 /*
  * Free queue.
