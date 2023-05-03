@@ -8,6 +8,7 @@
 #include <string.h>
 #include <time.h>
 #include <libgen.h>
+#include <pthread.h>
 
 #include "logger.h"
 #include "packets.h"
@@ -39,6 +40,13 @@
 
 #define     CONFIRM_CODE        0xff
 #define     NEGATIVE_CODE       0x00
+
+/* typedef struct { */
+/*     char **packets_buffer; */
+/*     unsigned int buffer_capacity; */
+/*     unsigned int buffer_size; */
+/*     unsigned char read_buffer; */
+/* } packets_buffer_t; */
 
 static char listener_logger[] = "listener.log";
 
@@ -131,24 +139,20 @@ void start_listener(char *ip_addr, int port) {
             sprintf(log_msg, "(DATA[%d]) data_length = %d", data_packet.packet_n & 0x7fffffff, data_packet.data_length);
             info(listener_logger, log_msg);
 
-            ack_packet.type = TYPE_ACK;
-            ack_packet.hash = data_owner->file_hash;
-            ack_packet.packet_n = data_packet.packet_n;
-
             if (calculate_crc(data_packet.data, data_packet.data_length, data_packet.CRC) == data_packet.CRC_remainder) {
                 ack_packet.state = CONFIRM_CODE;
                 info(listener_logger, "No problems has been detected while sending a packet.");
 
-                if (data_packet.packet_n == data_owner->packet_n) {
-                    fwrite(data_packet.data, sizeof(char), data_packet.data_length, data_owner->file);
-                    data_owner->packet_n++;
-                } else {
-                    sprintf(log_msg, "Repeated packet: %d.\n", data_owner->packet_n-1);
-                    warning(listener_logger, log_msg);
-                }
+                fseek(data_owner->file, data_packet.packet_n * sizeof(1003), SEEK_SET);
+                fwrite(data_packet.data, sizeof(char), data_packet.data_length, data_owner->file);
+                data_owner->packet_n++;
 
                 if (data_packet.packet_n & 0x80000000) {
                     info(listener_logger, "Last packet.");
+                    data_owner->max_packet_n = data_packet.packet_n & 0x7fffffff;
+                }
+
+                if (data_owner->packet_n == data_owner->max_packet_n) {
                     fclose(data_owner->file);
                     continue_listening = 0;
                 }
@@ -156,10 +160,10 @@ void start_listener(char *ip_addr, int port) {
                 ack_packet.state = NEGATIVE_CODE;
                 warning(listener_logger, "Packet information has been corrupted. Waiting for the sender response.");
             }
-            // if(counter == 150){
-            //     ack_packet.state = NEGATIVE_CODE;
-            // }
 
+            ack_packet.type = TYPE_ACK;
+            ack_packet.hash = data_owner->file_hash;
+            ack_packet.packet_n = data_packet.packet_n;
             info(listener_logger, "Sending ACK response...");
             if(counter != 2 && counter != 5){
                 if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
@@ -321,4 +325,5 @@ static void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet,
     }
     data_owner->file_hash = file_hash;
     data_owner->packet_n = 0;
+    data_owner->max_packet_n = 0 - 1; /* Maximum value of unsigned int. */
 }

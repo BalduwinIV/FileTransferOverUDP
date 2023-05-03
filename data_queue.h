@@ -10,6 +10,7 @@ typedef struct DATA_file_t {
     uint32_t file_hash;
     FILE *file;
     uint32_t packet_n;
+    uint32_t max_packet_n;
 } DATA_file_t;
 
 typedef struct {
