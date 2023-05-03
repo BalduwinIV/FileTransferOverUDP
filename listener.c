@@ -91,7 +91,7 @@ void start_listener(char *ip_addr, int port) {
     srand(time(NULL));
 
     _Bool continue_listening = 1;
-
+    int counter = 0;
     while (continue_listening) {
         if (recvfrom(server_socket, client_message, sizeof(client_message), 0, (struct sockaddr *)&client_addr, &client_message_length) < 0) {
             error(listener_logger, "Error accepting packet... Interrupting.");
@@ -156,15 +156,34 @@ void start_listener(char *ip_addr, int port) {
                 ack_packet.state = NEGATIVE_CODE;
                 warning(listener_logger, "Packet information has been corrupted. Waiting for the sender response.");
             }
+            // if(counter == 150){
+            //     ack_packet.state = NEGATIVE_CODE;
+            // }
 
             info(listener_logger, "Sending ACK response...");
-            if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
-                error(listener_logger, "Unable to send ACK message.\n");
-            } else {
-                info(listener_logger, "ACK message has been sent successfully.\n");
+            if(counter != 2 && counter != 5){
+                if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
+                    error(listener_logger, "Unable to send ACK message.\n");
+                } else {
+                    info(listener_logger, "ACK message has been sent successfully.\n");
+                }
             }
         } else {
             warning(listener_logger, "Unknown packet type.\n");
+            // if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
+            //     error(listener_logger, "Unable to send ACK message.\n");
+            // } else {
+            //     info(listener_logger, "ACK message has been sent successfully.\n");
+            // }
+            
+            
+
+            if (data_packet.packet_n & 0x80000000) {
+                info(listener_logger, "Last packet.");
+                fclose(data_owner->file);
+                continue_listening = 0;
+            }
+            counter++;
         }
     }
     stop_logging();
