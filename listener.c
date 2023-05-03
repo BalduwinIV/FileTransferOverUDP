@@ -58,7 +58,7 @@ void start_listener(char *ip_addr, int port) {
     /* Clean buffer. */
     memset(client_message, '\0', BUF_SIZE);
 
-    /* Create socket. */
+    /* Create server socket. */
     server_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (server_socket < 0) {
         error(listener_logger, "An error occurred while creating socket.");
@@ -78,6 +78,9 @@ void start_listener(char *ip_addr, int port) {
         exit(ERROR_BIND);
     }
     info(listener_logger, "Binding is done.");
+
+    /* Client socket */
+    /* client_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP); */
 
     info(listener_logger, "Starting listening...");
     fprintf(stderr, "Starting listening...\n");
@@ -160,6 +163,8 @@ void start_listener(char *ip_addr, int port) {
             } else {
                 info(listener_logger, "ACK message has been sent successfully.\n");
             }
+        } else {
+            warning(listener_logger, "Unknown packet type.\n");
         }
     }
     stop_logging();
