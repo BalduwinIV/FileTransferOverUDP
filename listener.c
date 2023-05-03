@@ -136,7 +136,7 @@ void start_listener(char *ip_addr, int port) {
                 ack_packet.state = CONFIRM_CODE;
                 info(listener_logger, "No problems has been detected while sending a packet.");
 
-                fseek(data_owner->file, data_packet.packet_n * sizeof(char) * 975, SEEK_SET);
+                fseek(data_owner->file, (data_packet.packet_n & 0x7fffffff) * sizeof(char) * 975, SEEK_SET);
                 fwrite(data_packet.data, sizeof(char), data_packet.data_length, data_owner->file);
                 data_owner->packet_n++;
 
@@ -145,7 +145,7 @@ void start_listener(char *ip_addr, int port) {
                     data_owner->max_packet_n = data_packet.packet_n & 0x7fffffff;
                 }
 
-                if (data_owner->packet_n == data_owner->max_packet_n) {
+                if (data_owner->packet_n >= data_owner->max_packet_n) {
                     fclose(data_owner->file);
                     continue_listening = 0;
                 }
@@ -158,6 +158,12 @@ void start_listener(char *ip_addr, int port) {
             memcpy(ack_packet.hash, data_owner->file_hash, SHA256_DIGEST_LENGTH);
             ack_packet.packet_n = data_packet.packet_n;
             info(listener_logger, "Sending ACK response...");
+
+            if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
+                error(listener_logger, "Unable to send ACK message.");
+            } else {
+                info(listener_logger, "ACK message has been sent successfully.");
+            }
         } else {
             warning(listener_logger, "Unknown packet type.\n");
         }
