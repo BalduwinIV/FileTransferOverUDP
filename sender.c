@@ -37,6 +37,7 @@
 #define     CONFIRM_CODE        0xff
 #define     NEGATIVE_CODE       0x00
 
+
 static char sender_logger[] = "sender.log";
 
 void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest_port, unsigned int CRC, char* filename);
