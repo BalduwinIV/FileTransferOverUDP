@@ -136,7 +136,7 @@ void start_listener(char *ip_addr, int port) {
                 ack_packet.state = CONFIRM_CODE;
                 info(listener_logger, "No problems has been detected while sending a packet.");
 
-                fseek(data_owner->file, data_packet.packet_n * sizeof(1003), SEEK_SET);
+                fseek(data_owner->file, data_packet.packet_n * sizeof(char) * 975, SEEK_SET);
                 fwrite(data_packet.data, sizeof(char), data_packet.data_length, data_owner->file);
                 data_owner->packet_n++;
 

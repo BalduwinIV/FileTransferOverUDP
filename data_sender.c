@@ -61,7 +61,7 @@ int main (int argc, char **argv) {
     } else if (operation == STOP) {
         stop_listeners();
     } else if (operation == SEND_DATA) {
-        send_data(local_ip_addr, local_port, dest_ip_addr, dest_port, filename);
+        send_data(local_ip_addr, local_port, dest_ip_addr, dest_port, CRC, filename);
     } else if (operation == HELP) {
         print_usage();
     }

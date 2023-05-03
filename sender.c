@@ -39,13 +39,13 @@
 
 static char sender_logger[] = "sender.log";
 
-void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest_port, char* filename);
+void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest_port, unsigned int CRC, char* filename);
 void set_ports_and_ip(struct sockaddr_in* client_addr, struct sockaddr_in* server_addr, 
                 char* local_ip_addr, int local_port, char* dest_ip_addr, int dest_port);
 void send_SYNC_packet(int socket_desc, int local_port, char* filename, unsigned char *file_hash);
-void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash);
+void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash, uint32_t CRC);
 
-void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest_port, char* filename) {
+void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest_port, unsigned int CRC, char* filename) {
     
     start_logging(sender_logger);
 
@@ -86,7 +86,7 @@ void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest
     send_SYNC_packet(socket_desc, local_port, filename, file_hash);
     
     // Send the remaining (DATA) packets:
-    send_DATA_packet(socket_desc, filename, file_hash);
+    send_DATA_packet(socket_desc, filename, file_hash, CRC);
     
     info(sender_logger, "All data has been successfully sent!");
     fprintf(stderr, "\x1b[38;5;37m\x1b[KAll data has been successfully sent!\x1b[m\x1b[K\n");
@@ -159,7 +159,7 @@ void send_SYNC_packet(int socket_desc, int local_port, char* filename, unsigned 
     }
 }
 
-void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash) {
+void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash, unsigned int CRC) {
     char log_msg[256];
     // Open file stream:
     FILE* file = fopen(filename, "rb");
@@ -185,7 +185,7 @@ void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash)
             data_packet.packet_n |= 0x80000000;
         }
         memcpy(data_packet.hash, file_hash, SHA256_DIGEST_LENGTH);
-        data_packet.CRC = 0b00001011;          // and CRC                   
+        data_packet.CRC = CRC;          // and CRC                   
         data_packet.CRC_remainder = calculate_crc(data_packet.data, data_packet.data_length, data_packet.CRC); // recuired!!!
         
         while(true){

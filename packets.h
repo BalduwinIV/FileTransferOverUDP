@@ -34,7 +34,7 @@ typedef struct {
     uint32_t data_length;
     uint32_t CRC; /* CRC polynomial. */
     uint32_t CRC_remainder;
-    unsigned char data[1003];
+    unsigned char data[975];
 } DATA_packet_t;
 
 #pragma pack(pop)
