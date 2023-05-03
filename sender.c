@@ -191,7 +191,7 @@ void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash,
         for(int i = 0; i < 10; i++){ //TODOOOOOOOOOO
             if(control_list[i] == 1){
                 info(sender_logger, "work");
-                fseek(file, ((sent_n/10)*10+i)*sizeof(data_packet.data), SEEK_SET);
+                // fseek(file, ((sent_n/10)*10+i)*sizeof(data_packet.data), SEEK_SET);
                 sent_n++;
                 if(sent_n%10 == 0){
                     memset(control_list, 0, sizeof(control_list));
@@ -200,6 +200,7 @@ void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash,
             }
             if(control_list[i] == 0){
                 data_packet.packet_n = (sent_n/10)*10+i;
+                fseek(file, (data_packet.packet_n*sizeof(data_packet.data)), SEEK_SET);
                 data_packet.data_length = fread(&data_packet.data, sizeof(char), sizeof(data_packet.data), file);
                 if (feof(file)) {
                     data_packet.packet_n |= 0x80000000;
@@ -233,8 +234,8 @@ void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash,
         // send n(10) packets and check response
         
         // waiting time (5 sec)
-        tv.tv_sec = 1;
-        tv.tv_usec = 0;
+        tv.tv_sec = 0;
+        tv.tv_usec = 1000;
 
         FD_ZERO(&read_fds);
         FD_SET(socket_desc, &read_fds);
