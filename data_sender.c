@@ -14,7 +14,7 @@
 #include "listener.h"
 #include "sender.h"
 
-#define     DEFAULT_CRC_CODE                0b11000000000000101
+#define     DEFAULT_CRC_CODE                0b10000100110000010001110110110111
 #define     DEFAULT_PACKETS_BUFFER_SIZE     1
 
 #define     SUCCESS_CODE        0
