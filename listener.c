@@ -11,6 +11,8 @@
 #include <pthread.h>
 #include <openssl/sha.h>
 
+#include "libcrc-2.0/include/checksum.h"
+
 #include "logger.h"
 #include "packets.h"
 #include "tools.h"
@@ -90,6 +92,7 @@ void start_listener(char *ip_addr, int port) {
     DATA_file_t *data_owner = safe_malloc(sizeof(DATA_file_t));
     DATA_packet_t data_packet;
     ACK_packet_t ack_packet;
+    unsigned short client_port = 5010;
     srand(time(NULL));
 
     _Bool continue_listening = 1;
@@ -110,6 +113,8 @@ void start_listener(char *ip_addr, int port) {
             ack_packet.state = CONFIRM_CODE;
             SHA256(sync_packet->filename, strlen((char *)sync_packet->filename), ack_packet.hash);
 
+            client_port = ntohs(client_addr.sin_port);
+
             if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
                 error(listener_logger, "Unable to send ACK message.");
             } else {
@@ -122,6 +127,7 @@ void start_listener(char *ip_addr, int port) {
         } else if (client_message[0] == TYPE_DATA) {
             memcpy(&data_packet, client_message, sizeof(DATA_packet_t));
 
+            printf("Packet #%d\n", data_packet.packet_n);
             info(listener_logger, "Packet type: DATA.");
             sprintf(log_msg, "(DATA[%d]) hash = %s", data_packet.packet_n & 0x7fffffff, data_packet.hash);
             info(listener_logger, log_msg);
@@ -132,7 +138,9 @@ void start_listener(char *ip_addr, int port) {
             sprintf(log_msg, "(DATA[%d]) data_length = %d", data_packet.packet_n & 0x7fffffff, data_packet.data_length);
             info(listener_logger, log_msg);
 
-            if (calculate_crc(data_packet.data, data_packet.data_length, data_packet.CRC) == data_packet.CRC_remainder) {
+            /* printf("%d\n", crc_32(data_packet.data, data_packet.data_length)); */
+            /* if (calculate_crc(data_packet.data, data_packet.data_length, data_packet.CRC) == data_packet.CRC_remainder) { */
+            if (crc_32(data_packet.data, data_packet.data_length) == data_packet.CRC_remainder) {
                 ack_packet.state = CONFIRM_CODE;
                 info(listener_logger, "No problems has been detected while sending a packet.");
 
@@ -158,6 +166,10 @@ void start_listener(char *ip_addr, int port) {
             memcpy(ack_packet.hash, data_owner->file_hash, SHA256_DIGEST_LENGTH);
             ack_packet.packet_n = data_packet.packet_n;
             info(listener_logger, "Sending ACK response...");
+
+            client_addr.sin_family = AF_INET;
+            client_addr.sin_addr.s_addr = inet_addr(inet_ntoa(client_addr.sin_addr));
+            client_addr.sin_port = htons(client_port);
 
             if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
                 error(listener_logger, "Unable to send ACK message.");
