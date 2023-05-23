@@ -92,7 +92,7 @@ void start_listener(char *ip_addr, int port) {
     DATA_file_t *data_owner = safe_malloc(sizeof(DATA_file_t));
     DATA_packet_t data_packet;
     ACK_packet_t ack_packet;
-    unsigned short client_port = 5010;
+    unsigned short client_port = 5000;
     srand(time(NULL));
 
     _Bool continue_listening = 1;
@@ -111,7 +111,7 @@ void start_listener(char *ip_addr, int port) {
             ack_packet.type = TYPE_ACK;
             ack_packet.packet_n = 0;
             ack_packet.state = CONFIRM_CODE;
-            SHA256(sync_packet->filename, strlen((char *)sync_packet->filename), ack_packet.hash);
+            // SHA256(sync_packet->filename, strlen((char *)sync_packet->filename), ack_packet.hash);
 
             client_port = ntohs(client_addr.sin_port);
 
@@ -121,17 +121,15 @@ void start_listener(char *ip_addr, int port) {
                 info(listener_logger, "ACK message has been sent successfully.");
             }
 
-            setup_data_file(data_owner, sync_packet, ack_packet.hash);
+            // setup_data_file(data_owner, sync_packet, ack_packet.hash);
 
             free(sync_packet);
         } else if (client_message[0] == TYPE_DATA) {
             memcpy(&data_packet, client_message, sizeof(DATA_packet_t));
 
             printf("Packet #%d\n", data_packet.packet_n);
-            info(listener_logger, "Packet type: DATA.");
-            sprintf(log_msg, "(DATA[%d]) hash = %s", data_packet.packet_n & 0x7fffffff, data_packet.hash);
-            info(listener_logger, log_msg);
-            sprintf(log_msg, "(DATA[%d]) CRC = %d", data_packet.packet_n & 0x7fffffff, data_packet.CRC);
+            // info(listener_logger, "Packet type: DATA.");
+            // sprintf(log_msg, "(DATA[%d]) hash = %s", data_packet.packet_n & 0x7fffffff, data_packet.hash);
             info(listener_logger, log_msg);
             sprintf(log_msg, "(DATA[%d]) CRC_remainder = %d", data_packet.packet_n & 0x7fffffff, data_packet.CRC_remainder);
             info(listener_logger, log_msg);
@@ -163,7 +161,7 @@ void start_listener(char *ip_addr, int port) {
             }
 
             ack_packet.type = TYPE_ACK;
-            memcpy(ack_packet.hash, data_owner->file_hash, SHA256_DIGEST_LENGTH);
+            // memcpy(ack_packet.hash, data_owner->file_hash, SHA256_DIGEST_LENGTH);
             ack_packet.packet_n = data_packet.packet_n;
             info(listener_logger, "Sending ACK response...");
 
