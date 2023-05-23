@@ -48,7 +48,7 @@ static char listener_logger[] = "listener.log";
 
 static void start_daemon();
 static SYNC_packet_t * parse_SYNC_packet(unsigned char *client_message, struct sockaddr_in *client_addr);
-static void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet, unsigned char *file_hash);
+static void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet);
 
 void start_listener(char *ip_addr, int port) {
     int server_socket;
@@ -107,30 +107,42 @@ void start_listener(char *ip_addr, int port) {
         if (client_message[0] == TYPE_SYNC) {
             info(listener_logger, "Packet type: SYNC.");
             SYNC_packet_t *sync_packet = parse_SYNC_packet(client_message, &client_addr);
-    
-            ack_packet.type = TYPE_ACK;
-            ack_packet.packet_n = 0;
-            ack_packet.state = CONFIRM_CODE;
-            // SHA256(sync_packet->filename, strlen((char *)sync_packet->filename), ack_packet.hash);
+            if (crc_32(client_message, sizeof(SYNC_packet_t)-sizeof(sync_packet->CRC_remainder)) == sync_packet->CRC_remainder) {
+                ack_packet.type = TYPE_ACK;
+                ack_packet.packet_n = 0;
+                ack_packet.state = CONFIRM_CODE;
+                ack_packet.CRC_remainder = crc_32((unsigned char *)&ack_packet, sizeof(ACK_packet_t)-sizeof(ack_packet.CRC_remainder));
 
-            client_port = ntohs(client_addr.sin_port);
+                client_port = ntohs(client_addr.sin_port);
 
-            if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
-                error(listener_logger, "Unable to send ACK message.");
+                if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
+                    error(listener_logger, "Unable to send ACK message.");
+                } else {
+                    info(listener_logger, "ACK message has been sent successfully.");
+                }
+
+                setup_data_file(data_owner, sync_packet);
+
+                free(sync_packet);
             } else {
-                info(listener_logger, "ACK message has been sent successfully.");
+                error(listener_logger, "CRC check failed for SYNC packet.");
+                ack_packet.type = TYPE_ACK;
+                ack_packet.packet_n = 0;
+                ack_packet.state = NEGATIVE_CODE;
+                ack_packet.CRC_remainder = crc_32((unsigned char *)&ack_packet, sizeof(ACK_packet_t)-sizeof(ack_packet.CRC_remainder));
+
+                if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
+                    error(listener_logger, "Unable to send ACK message.");
+                } else {
+                    info(listener_logger, "ACK message has been sent successfully.");
+                }
             }
 
-            // setup_data_file(data_owner, sync_packet, ack_packet.hash);
-
-            free(sync_packet);
         } else if (client_message[0] == TYPE_DATA) {
             memcpy(&data_packet, client_message, sizeof(DATA_packet_t));
 
             printf("Packet #%d\n", data_packet.packet_n);
-            // info(listener_logger, "Packet type: DATA.");
-            // sprintf(log_msg, "(DATA[%d]) hash = %s", data_packet.packet_n & 0x7fffffff, data_packet.hash);
-            info(listener_logger, log_msg);
+            info(listener_logger, "Packet type: DATA.");
             sprintf(log_msg, "(DATA[%d]) CRC_remainder = %d", data_packet.packet_n & 0x7fffffff, data_packet.CRC_remainder);
             info(listener_logger, log_msg);
             sprintf(log_msg, "(DATA[%d]) data_length = %d", data_packet.packet_n & 0x7fffffff, data_packet.data_length);
@@ -138,11 +150,11 @@ void start_listener(char *ip_addr, int port) {
 
             /* printf("%d\n", crc_32(data_packet.data, data_packet.data_length)); */
             /* if (calculate_crc(data_packet.data, data_packet.data_length, data_packet.CRC) == data_packet.CRC_remainder) { */
-            if (crc_32(data_packet.data, data_packet.data_length) == data_packet.CRC_remainder) {
+            if (crc_32((unsigned char *)&data_packet, sizeof(data_packet)-sizeof(data_packet.CRC_remainder)) == data_packet.CRC_remainder) {
                 ack_packet.state = CONFIRM_CODE;
                 info(listener_logger, "No problems has been detected while sending a packet.");
 
-                fseek(data_owner->file, (data_packet.packet_n & 0x7fffffff) * sizeof(char) * 975, SEEK_SET);
+                fseek(data_owner->file, (data_packet.packet_n & 0x7fffffff) * sizeof(char) * sizeof(data_packet.data), SEEK_SET);
                 fwrite(data_packet.data, sizeof(char), data_packet.data_length, data_owner->file);
                 data_owner->packet_n++;
 
@@ -161,8 +173,8 @@ void start_listener(char *ip_addr, int port) {
             }
 
             ack_packet.type = TYPE_ACK;
-            // memcpy(ack_packet.hash, data_owner->file_hash, SHA256_DIGEST_LENGTH);
             ack_packet.packet_n = data_packet.packet_n;
+            ack_packet.CRC_remainder = crc_32((unsigned char *)&ack_packet, sizeof(ACK_packet_t)-sizeof(ack_packet.CRC_remainder));
             info(listener_logger, "Sending ACK response...");
 
             client_addr.sin_family = AF_INET;
@@ -305,13 +317,12 @@ static SYNC_packet_t * parse_SYNC_packet(unsigned char *client_message, struct s
     return sync_packet;
 }
 
-static void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet, unsigned char *file_hash) {
+static void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet) {
     data_owner->file = fopen(basename((char *)sync_packet->filename), "wb");
     if (!data_owner->file) {
         error(listener_logger, "Error opening file. Interrupting.");
         exit(ERROR_FOPEN);
     }
-    data_owner->file_hash = file_hash;
     data_owner->packet_n = 0;
     data_owner->max_packet_n = 0 - 1; /* Maximum value of unsigned int. */
 }
