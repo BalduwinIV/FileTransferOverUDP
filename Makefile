@@ -5,7 +5,7 @@ OBJS=$(patsubst %.c,%.o,$(wildcard *.c))
 
 TARGET=data_sender
 
-bin: $(TARGET)
+all: $(TARGET)
 
 $(OBJS): %.o: %.c
 	$(CC) -c $< $(CFLAGS) $(CPPFLAGS) -o $@

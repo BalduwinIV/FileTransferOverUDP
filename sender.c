@@ -38,6 +38,9 @@
 #define     NEGATIVE_CODE       0x00
 
 static char sender_logger[] = "sender.log";
+struct sockaddr_in client_addr;
+struct sockaddr_in server_addr;
+unsigned int length = sizeof(server_addr);
 
 void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest_port, unsigned int CRC, char* filename);
 void set_ports_and_ip(struct sockaddr_in* client_addr, struct sockaddr_in* server_addr, 
@@ -53,29 +56,33 @@ void send_data(char* local_ip_addr, int local_port, char* dest_ip_addr, int dest
     int socket_desc = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if(socket_desc < 0){
         error(sender_logger, "An error occurred while creating socket.");
+        stop_logging();
         exit(ERROR_SOCKET);
     }
     info(sender_logger, "Socket has been created successfully.");
     
     // Set local and server's port and IP:
-    struct sockaddr_in client_addr;
-    struct sockaddr_in server_addr;
+    
     set_ports_and_ip(&client_addr, &server_addr, local_ip_addr, local_port, dest_ip_addr, dest_port);
     
     // Bind to the set port and IP:
     info(sender_logger, "Binding the socket and IP.");
+    printf("%d\n", ntohs(client_addr.sin_port));
     if(bind(socket_desc, (struct sockaddr*)&client_addr, sizeof(client_addr)) < 0){
         error(sender_logger, "An error occurred while binding the port and IP.");
+        stop_logging();
         exit(ERROR_BIND);
+
     }
     info(sender_logger, "Binding is done.");
     
     // Send connection request to server:
     info(sender_logger, "Connecting to server.");
-    if(connect(socket_desc, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0){
-        error(sender_logger, "Unable to connect.\n");
-        exit(ERROR);
-    }
+    // if(connect(socket_desc, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0){
+    //     error(sender_logger, "Unable to connect.\n");
+    //     stop_logging();
+    //     exit(ERROR);
+    // }
     info(sender_logger, "Connected with server successfully.");
     info(sender_logger, "Starting sending...\n");
     fprintf(stderr, "\x1b[38;5;141m\x1b[KStarting sending...\x1b[m\x1b[K\n");
@@ -114,7 +121,7 @@ void send_SYNC_packet(int socket_desc, int local_port, char* filename, unsigned 
     SYNC_packet_t sync_packet;
 
     sync_packet.type = TYPE_SYNC;
-    sync_packet.sender_port = local_port;
+    sync_packet.sender_port = 5010;
     strcpy((char *)sync_packet.filename, filename);
 
     unsigned char server_message[BUF_SIZE];
@@ -126,10 +133,14 @@ void send_SYNC_packet(int socket_desc, int local_port, char* filename, unsigned 
     memset(ack_packet.hash, '\0', SHA256_DIGEST_LENGTH);
     ack_packet.state = 0;
 
+    // fd_set read_fds;
+    // struct timeval tv;
+
     while (true) {
         // Send messege to server:
         info(sender_logger, "Sending SYNC packet.");
-        if(send(socket_desc, client_message, sizeof(SYNC_packet_t), 0) < 0){
+        
+        if(sendto(socket_desc, client_message, sizeof(SYNC_packet_t), 0, (struct sockaddr *)&server_addr, length) < 0){
             error(sender_logger, "Unable to send message, trying again!");
             sleep(ONE_SEC);
             continue;
@@ -137,16 +148,24 @@ void send_SYNC_packet(int socket_desc, int local_port, char* filename, unsigned 
         info(sender_logger, "Sending is done.");
 
         // Receive the server's response:
-        info(sender_logger, "Waiting for ACK response.");
-        if(recv(socket_desc, &ack_packet, sizeof(ACK_packet_t), 0) < 0){
-            error(sender_logger, "Error while receiving server's msg.");
+        // info(sender_logger, "Waiting for ACK response.");
+        
+        // if(recv(socket_desc, &ack_packet, sizeof(ACK_packet_t), 0) < 0){
+        //     error(sender_logger, "Error while receiving server's msg.");
+        //     exit(ERROR_RECEIVE);
+        // }
+        // info(sender_logger, "Response was received.");
+        info(sender_logger, "Waiting for response.");
+        if (recvfrom(socket_desc, &ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, &length) < 0) {
+            error(sender_logger, "Error accepting packet... Interrupting.");
             exit(ERROR_RECEIVE);
         }
-        info(sender_logger, "Response was received.");
-        
+        sprintf(log_msg, "Packet from %s:%d.", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+        info(sender_logger, log_msg);
+
         // Check recieved data:
         if (ack_packet.type != TYPE_ACK || ack_packet.state <= 0x40) {
-            error(sender_logger, "Something went wrong. Trying to send the ACK package again.\n");
+            error(sender_logger, "Something went wrong. Trying to send the SYNC package again.\n");
             sleep(ONE_SEC);
         } else {
             info(sender_logger, "The first package was received successfully!");
@@ -199,7 +218,7 @@ void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash,
             info(sender_logger, log_msg);
             sprintf(log_msg, "(DATA[%d]) data_length = %d", data_packet.packet_n & 0x7fffffff, data_packet.data_length);
             info(sender_logger, log_msg);
-            if(send(socket_desc, (unsigned char*)&data_packet, sizeof(DATA_packet_t), 0) < 0){
+            if(sendto(socket_desc, (unsigned char*)&data_packet, sizeof(DATA_packet_t), 0, (struct sockaddr *)&server_addr, length) < 0){
                 error(sender_logger, "Unable to send DATA message. Trying to send again");
                 sleep(1);
                 continue;
@@ -208,8 +227,8 @@ void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash,
             }
 
             // waiting time (5 sec)
-            tv.tv_sec = 3;
-            tv.tv_usec = 0;
+            tv.tv_sec = 0;
+            tv.tv_usec = 250*1000;
 
             FD_ZERO(&read_fds);
             FD_SET(socket_desc, &read_fds);
@@ -217,7 +236,7 @@ void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash,
             info(sender_logger, "Waiting for ACK response.");
             if(select(socket_desc+1, &read_fds, NULL, NULL, &tv) > 0){
                 if(FD_ISSET(socket_desc, &read_fds)){
-                    if(recv(socket_desc, &ack_packet, sizeof(ACK_packet_t), 0) < 0){
+                    if (recvfrom(socket_desc, &ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, &length) < 0) {
                         error(sender_logger, "Error while receiving server's msg.");
                         exit(ERROR_RECEIVE);
                     }
@@ -235,7 +254,7 @@ void send_DATA_packet(int socket_desc, char* filename, unsigned char *file_hash,
         }
         
         data_packet.packet_n++;
-        nanosleep(&request, &remaining);
+        // nanosleep(&request, &remaining);
     }
     // Close file stream:
     fclose(file);
