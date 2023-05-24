@@ -4,7 +4,8 @@
 #include <stdint.h>
 #include <openssl/sha.h>
 
-#define     TYPE_SYNC   3
+#define     TYPE_HASH   3
+#define     TYPE_SYNC   2
 #define     TYPE_ACK    1
 #define     TYPE_DATA   0
 

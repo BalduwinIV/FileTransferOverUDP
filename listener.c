@@ -31,16 +31,6 @@
 #define     BUF_SIZE            1024
 #endif
 
-#ifndef TYPE_SYNC
-#define     TYPE_SYNC           3
-#endif
-#ifndef TYPE_ACK
-#define     TYPE_ACK            1
-#endif
-#ifndef TYPE_DATA
-#define     TYPE_DATA           0
-#endif
-
 #define     CONFIRM_CODE        0xff
 #define     NEGATIVE_CODE       0x00
 
