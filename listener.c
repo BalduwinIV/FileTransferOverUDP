@@ -87,12 +87,12 @@ void start_listener(char *ip_addr, int port) {
     /* client_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP); */
 
     info(listener_logger, "Starting listening...");
-    fprintf(stderr, "Starting listening...\n");
+    fprintf(stderr, "\x1b[38;5;141m\x1b[KStarting listening...\x1b[m\x1b[K\n");
 
     DATA_file_t *data_owner = safe_malloc(sizeof(DATA_file_t));
     DATA_packet_t data_packet;
     ACK_packet_t ack_packet;
-    unsigned short client_port = 5000;
+    unsigned short client_port;
     srand(time(NULL));
 
     _Bool continue_listening = 1;
@@ -141,7 +141,7 @@ void start_listener(char *ip_addr, int port) {
         } else if (client_message[0] == TYPE_DATA) {
             memcpy(&data_packet, client_message, sizeof(DATA_packet_t));
 
-            printf("Packet #%d\n", data_packet.packet_n);
+            printf("Packet #%d\n", data_packet.packet_n & 0x7fffffff);
             info(listener_logger, "Packet type: DATA.");
             sprintf(log_msg, "(DATA[%d]) CRC_remainder = %d", data_packet.packet_n & 0x7fffffff, data_packet.CRC_remainder);
             info(listener_logger, log_msg);
@@ -184,7 +184,7 @@ void start_listener(char *ip_addr, int port) {
             if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
                 error(listener_logger, "Unable to send ACK message.");
             } else {
-                info(listener_logger, "ACK message has been sent successfully.");
+                info(listener_logger, "ACK message has been sent successfully.\n");
             }
         } else {
             warning(listener_logger, "Unknown packet type.\n");
