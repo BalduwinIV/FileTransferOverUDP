@@ -8,12 +8,15 @@
 #include <string.h>
 #include <time.h>
 #include <libgen.h>
+#include <pthread.h>
+#include <openssl/sha.h>
+
+#include "libcrc-2.0/include/checksum.h"
 
 #include "logger.h"
 #include "packets.h"
 #include "tools.h"
 #include "data_queue.h"
-#include "crc.h"
 
 #define     SUCCESS_CODE        0
 
@@ -27,24 +30,15 @@
 #define     BUF_SIZE            1024
 #endif
 
-#ifndef TYPE_SYNC
-#define     TYPE_SYNC           3
-#endif
-#ifndef TYPE_ACK
-#define     TYPE_ACK            1
-#endif
-#ifndef TYPE_DATA
-#define     TYPE_DATA           0
-#endif
-
 #define     CONFIRM_CODE        0xff
 #define     NEGATIVE_CODE       0x00
 
 static char listener_logger[] = "listener.log";
 
+static unsigned char compare_hash(unsigned char *original_hash, FILE *data_file);
 static void start_daemon();
 static SYNC_packet_t * parse_SYNC_packet(unsigned char *client_message, struct sockaddr_in *client_addr);
-static void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet, uint32_t file_hash);
+static void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet);
 
 void start_listener(char *ip_addr, int port) {
     int server_socket;
@@ -58,7 +52,7 @@ void start_listener(char *ip_addr, int port) {
     /* Clean buffer. */
     memset(client_message, '\0', BUF_SIZE);
 
-    /* Create socket. */
+    /* Create server socket. */
     server_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (server_socket < 0) {
         error(listener_logger, "An error occurred while creating socket.");
@@ -79,16 +73,21 @@ void start_listener(char *ip_addr, int port) {
     }
     info(listener_logger, "Binding is done.");
 
+    /* Client socket */
+    /* client_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP); */
+
     info(listener_logger, "Starting listening...");
-    fprintf(stderr, "Starting listening...\n");
+    fprintf(stderr, "\x1b[38;5;141m\x1b[KStarting listening...\x1b[m\x1b[K\n");
 
     DATA_file_t *data_owner = safe_malloc(sizeof(DATA_file_t));
     DATA_packet_t data_packet;
     ACK_packet_t ack_packet;
+    HASH_packet_t hash_packet;
+    unsigned char is_accepted = 0;
+    unsigned short client_port = 5010;
     srand(time(NULL));
 
     _Bool continue_listening = 1;
-
     while (continue_listening) {
         if (recvfrom(server_socket, client_message, sizeof(client_message), 0, (struct sockaddr *)&client_addr, &client_message_length) < 0) {
             error(listener_logger, "Error accepting packet... Interrupting.");
@@ -97,65 +96,154 @@ void start_listener(char *ip_addr, int port) {
         sprintf(log_msg, "Packet from %s:%d.", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
         info(listener_logger, log_msg);
 
+        /* printf("Type: %d\n", client_message[0]); */
+
         if (client_message[0] == TYPE_SYNC) {
             info(listener_logger, "Packet type: SYNC.");
             SYNC_packet_t *sync_packet = parse_SYNC_packet(client_message, &client_addr);
-    
-            ack_packet.type = TYPE_ACK;
-            ack_packet.hash = rand();
-            ack_packet.packet_n = 0;
-            ack_packet.state = CONFIRM_CODE;
+            if (crc_32(client_message, sizeof(SYNC_packet_t)-sizeof(sync_packet->CRC_remainder)) == sync_packet->CRC_remainder) {
+                ack_packet.type = TYPE_ACK;
+                ack_packet.packet_n = 0;
+                ack_packet.state = CONFIRM_CODE;
+                ack_packet.CRC_remainder = crc_32((unsigned char *)&ack_packet, sizeof(ACK_packet_t)-sizeof(ack_packet.CRC_remainder));
 
-            if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
-                error(listener_logger, "Unable to send ACK message.");
+                client_port = ntohs(client_addr.sin_port);
+
+                if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
+                    error(listener_logger, "Unable to send ACK message.");
+                } else {
+                    info(listener_logger, "ACK message has been sent successfully.");
+                }
+
+                setup_data_file(data_owner, sync_packet);
+
+                free(sync_packet);
             } else {
-                info(listener_logger, "ACK message has been sent successfully.");
+                error(listener_logger, "CRC check failed for SYNC packet.");
+                ack_packet.type = TYPE_ACK;
+                ack_packet.packet_n = 0;
+                ack_packet.state = NEGATIVE_CODE;
+                ack_packet.CRC_remainder = crc_32((unsigned char *)&ack_packet, sizeof(ACK_packet_t)-sizeof(ack_packet.CRC_remainder));
+
+                if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
+                    error(listener_logger, "Unable to send ACK message.");
+                } else {
+                    info(listener_logger, "ACK message has been sent successfully.");
+                }
             }
 
-            setup_data_file(data_owner, sync_packet, ack_packet.hash);
-
-            free(sync_packet);
         } else if (client_message[0] == TYPE_DATA) {
             memcpy(&data_packet, client_message, sizeof(DATA_packet_t));
 
+            printf("Packet #%d\n", data_packet.packet_n & 0x7fffffff);
             info(listener_logger, "Packet type: DATA.");
-            sprintf(log_msg, "(DATA[%d]) hash = %d", data_packet.packet_n & 0x7fffffff, data_packet.hash & 0x3fffffff);
-            info(listener_logger, log_msg);
-            sprintf(log_msg, "(DATA[%d]) CRC = %d", data_packet.packet_n & 0x7fffffff, data_packet.CRC);
-            info(listener_logger, log_msg);
             sprintf(log_msg, "(DATA[%d]) CRC_remainder = %d", data_packet.packet_n & 0x7fffffff, data_packet.CRC_remainder);
             info(listener_logger, log_msg);
             sprintf(log_msg, "(DATA[%d]) data_length = %d", data_packet.packet_n & 0x7fffffff, data_packet.data_length);
             info(listener_logger, log_msg);
 
-            ack_packet.type = TYPE_ACK;
-            ack_packet.hash = data_owner->file_hash;
-            ack_packet.packet_n = data_packet.packet_n;
-
-            if (calculate_crc(data_packet.data, data_packet.data_length, data_packet.CRC) == data_packet.CRC_remainder) {
+            /* printf("%d\n", crc_32(data_packet.data, data_packet.data_length)); */
+            /* if (calculate_crc(data_packet.data, data_packet.data_length, data_packet.CRC) == data_packet.CRC_remainder) { */
+            if (crc_32((unsigned char *)&data_packet, sizeof(data_packet)-sizeof(data_packet.CRC_remainder)) == data_packet.CRC_remainder) {
                 ack_packet.state = CONFIRM_CODE;
                 info(listener_logger, "No problems has been detected while sending a packet.");
+
+                fseek(data_owner->file, (data_packet.packet_n & 0x7fffffff) * sizeof(char) * sizeof(data_packet.data), SEEK_SET);
                 fwrite(data_packet.data, sizeof(char), data_packet.data_length, data_owner->file);
+                data_owner->packet_n++;
+
+                if (data_packet.packet_n & 0x80000000) {
+                    info(listener_logger, "Last packet.");
+                    data_owner->max_packet_n = data_packet.packet_n & 0x7fffffff;
+                }
             } else {
                 ack_packet.state = NEGATIVE_CODE;
                 warning(listener_logger, "Packet information has been corrupted. Waiting for the sender response.");
             }
 
+            ack_packet.type = TYPE_ACK;
+            ack_packet.packet_n = data_packet.packet_n;
+            ack_packet.CRC_remainder = crc_32((unsigned char *)&ack_packet, sizeof(ACK_packet_t)-sizeof(ack_packet.CRC_remainder));
             info(listener_logger, "Sending ACK response...");
+
+            client_addr.sin_family = AF_INET;
+            client_addr.sin_addr.s_addr = inet_addr(inet_ntoa(client_addr.sin_addr));
+            client_addr.sin_port = htons(client_port);
+
             if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
-                error(listener_logger, "Unable to send ACK message.\n");
+                error(listener_logger, "Unable to send ACK message.");
             } else {
                 info(listener_logger, "ACK message has been sent successfully.\n");
             }
+            
+        } else if (client_message[0] == TYPE_HASH) {
+            memcpy(&hash_packet, client_message, sizeof(HASH_packet_t));
 
-            if (data_packet.packet_n & 0x80000000) {
-                info(listener_logger, "Last packet.");
-                fclose(data_owner->file);
-                continue_listening = 0;
+            info(listener_logger, "Packet type: HASH.");
+            sprintf(log_msg, "(HASH) CRC_remainder = %d", hash_packet.CRC_remainder);
+            info(listener_logger, log_msg);
+
+            if (is_accepted) {
+                ack_packet.state = CONFIRM_CODE;
+            } else {
+                if (crc_32((unsigned char *)&hash_packet, sizeof(hash_packet)-sizeof(hash_packet.CRC_remainder)) == hash_packet.CRC_remainder) {
+                    if (compare_hash(hash_packet.hash, data_owner->file)) {
+                        ack_packet.state = CONFIRM_CODE;
+                        fclose(data_owner->file);
+                        is_accepted = 1;
+                        info(listener_logger, "No problems has been detected while sending a packet.");
+                    } else {
+                        ack_packet.state = NEGATIVE_CODE;
+                        warning(listener_logger, "Files hash does not match.");
+                    }
+                } else {
+                    ack_packet.state = NEGATIVE_CODE;
+                    warning(listener_logger, "Packet information has been corrupted. Waiting for the sender response.");
+                }
             }
+
+            ack_packet.type = TYPE_ACK;
+            ack_packet.packet_n = 0;
+            ack_packet.CRC_remainder = crc_32((unsigned char *)&ack_packet, sizeof(ACK_packet_t)-sizeof(ack_packet.CRC_remainder));
+            info(listener_logger, "Sending ACK response...");
+
+            client_addr.sin_family = AF_INET;
+            client_addr.sin_addr.s_addr = inet_addr(inet_ntoa(client_addr.sin_addr));
+            client_addr.sin_port = htons(client_port);
+
+            if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
+                error(listener_logger, "Unable to send ACK message.");
+            } else {
+                info(listener_logger, "ACK message has been sent successfully.\n");
+            }
+        } else {
+            warning(listener_logger, "Unknown packet type.\n");
         }
     }
     stop_logging();
+}
+
+static unsigned char compare_hash(unsigned char *original_hash, FILE *data_file) {
+    SHA256_CTX ctx;
+    unsigned char buffer[1011];
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    int bytes_read;
+
+    fseek(data_file, 0, SEEK_SET);
+
+    SHA256_Init(&ctx);
+
+    while ((bytes_read = fread(buffer, sizeof(char), 1011, data_file)) != 0) {
+        SHA256_Update(&ctx, buffer, bytes_read);
+    }
+
+    SHA256_Final(hash, &ctx);
+    
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        printf("%2x\n", original_hash[i]);
+    }
+
+    return 1;
 }
 
 static void start_daemon() {
@@ -236,12 +324,12 @@ static SYNC_packet_t * parse_SYNC_packet(unsigned char *client_message, struct s
 
     sprintf(log_msg, "Filename = %s", sync_packet->filename);
     info(listener_logger, log_msg);
-    if (access(sync_packet->filename, F_OK) == 0) {
+    if (access((char *)sync_packet->filename, F_OK) == 0) {
         warning(listener_logger, "This file does already exists.");
         char new_filename[80];
         uint8_t str_i;
         for (int f_index = 0; f_index < 100; f_index++) {
-            strcpy(new_filename, sync_packet->filename);
+            strcpy(new_filename, (char *)sync_packet->filename);
             str_i = 0;
             while (sync_packet->filename[str_i] != '.' && sync_packet->filename[str_i] != '\0') {
                 str_i++;
@@ -268,7 +356,7 @@ static SYNC_packet_t * parse_SYNC_packet(unsigned char *client_message, struct s
                     sprintf(log_msg, "Could not create file \"%s\".", new_filename);
                 }
             } else {
-                strcpy(sync_packet->filename, new_filename);
+                strcpy((char *)sync_packet->filename, new_filename);
                 sprintf(log_msg, "File \"%s\" has been successfully created.", new_filename);
                 break;
             }
@@ -282,12 +370,12 @@ static SYNC_packet_t * parse_SYNC_packet(unsigned char *client_message, struct s
     return sync_packet;
 }
 
-static void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet, uint32_t file_hash) {
-    data_owner->file = fopen(basename(sync_packet->filename), "wb");
+static void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet) {
+    data_owner->file = fopen(basename((char *)sync_packet->filename), "wb");
     if (!data_owner->file) {
         error(listener_logger, "Error opening file. Interrupting.");
         exit(ERROR_FOPEN);
     }
-    data_owner->file_hash = file_hash;
     data_owner->packet_n = 0;
+    data_owner->max_packet_n = 0 - 1; /* Maximum value of unsigned int. */
 }

@@ -32,7 +32,7 @@ void * safe_realloc(void *ptr, int capacity) {
     return tmp;
 }
 
-void parse_args(int argc, char **argv, char **local_ip_addr, int *local_port, char **dest_ip_addr, int *dest_port, char **filename, unsigned char *operation) {
+void parse_args(int argc, char **argv, char **local_ip_addr, int *local_port, char **dest_ip_addr, int *dest_port, unsigned int *CRC, unsigned char *packets_buffer_size, char **filename, unsigned char *operation) {
     int j;
     char *arg;
     for (int i = 1; i < argc; i++) {
@@ -54,6 +54,20 @@ void parse_args(int argc, char **argv, char **local_ip_addr, int *local_port, ch
             *dest_port = 0;
             while (argv[i][j] != '\0') {
                 *dest_port = *dest_port * 10 + (argv[i][j] - '0');
+                j++;
+            }
+        } else if (strncmp("--CRC=", argv[i], 6*sizeof(char)) == 0) {
+            j = 6;
+            *CRC = 0;
+            while (argv[i][j] != '\0') {
+                *CRC = (*CRC << 1) | (argv[i][j] - '0');
+                j++;
+            }
+        } else if (strncmp("--n=", argv[i], 4*sizeof(char)) == 0) {
+            j = 4;
+            *packets_buffer_size = 0;
+            while(argv[i][j] != '\0') {
+                *packets_buffer_size = *packets_buffer_size * 10 + (argv[i][j] - '0');
                 j++;
             }
         } else if (strncmp("--filename=", argv[i], 11*sizeof(char)) == 0) {
