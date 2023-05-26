@@ -9,7 +9,6 @@ options:
     --port=LOCAL_PORT           Defines the port that will be open for data transfering.
     --dest_ip=TARGET_IP         Sets the ip adress of a user, who will receive data.
     --dest_port=TARGET_PORT     Defines the port of a user, who will receive data.
-    --CRC=CRC_CODE              Defines CRC code by number (1101 for CRC-3, for example).
     --n=PACKETS_BUFFER_SIZE     Defines size of packets buffer.
     --filename=FILENAME         Defines the name of file, that yo want to send.
 commands:
