@@ -17,7 +17,6 @@
 #include "packets.h"
 #include "tools.h"
 #include "data_queue.h"
-#include "crc.h"
 
 #define     SUCCESS_CODE        0
 
@@ -31,21 +30,12 @@
 #define     BUF_SIZE            1024
 #endif
 
-#ifndef TYPE_SYNC
-#define     TYPE_SYNC           3
-#endif
-#ifndef TYPE_ACK
-#define     TYPE_ACK            1
-#endif
-#ifndef TYPE_DATA
-#define     TYPE_DATA           0
-#endif
-
 #define     CONFIRM_CODE        0xff
 #define     NEGATIVE_CODE       0x00
 
 static char listener_logger[] = "listener.log";
 
+static unsigned char compare_hash(unsigned char *original_hash, FILE *data_file);
 static void start_daemon();
 static SYNC_packet_t * parse_SYNC_packet(unsigned char *client_message, struct sockaddr_in *client_addr);
 static void setup_data_file(DATA_file_t *data_owner, SYNC_packet_t *sync_packet);
@@ -92,7 +82,9 @@ void start_listener(char *ip_addr, int port) {
     DATA_file_t *data_owner = safe_malloc(sizeof(DATA_file_t));
     DATA_packet_t data_packet;
     ACK_packet_t ack_packet;
-    unsigned short client_port;
+    HASH_packet_t hash_packet;
+    unsigned char is_accepted = 0;
+    unsigned short client_port = 5010;
     srand(time(NULL));
 
     _Bool continue_listening = 1;
@@ -103,6 +95,8 @@ void start_listener(char *ip_addr, int port) {
         }
         sprintf(log_msg, "Packet from %s:%d.", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
         info(listener_logger, log_msg);
+
+        /* printf("Type: %d\n", client_message[0]); */
 
         if (client_message[0] == TYPE_SYNC) {
             info(listener_logger, "Packet type: SYNC.");
@@ -162,11 +156,6 @@ void start_listener(char *ip_addr, int port) {
                     info(listener_logger, "Last packet.");
                     data_owner->max_packet_n = data_packet.packet_n & 0x7fffffff;
                 }
-
-                if (data_owner->packet_n >= data_owner->max_packet_n) {
-                    fclose(data_owner->file);
-                    continue_listening = 0;
-                }
             } else {
                 ack_packet.state = NEGATIVE_CODE;
                 warning(listener_logger, "Packet information has been corrupted. Waiting for the sender response.");
@@ -186,11 +175,75 @@ void start_listener(char *ip_addr, int port) {
             } else {
                 info(listener_logger, "ACK message has been sent successfully.\n");
             }
+            
+        } else if (client_message[0] == TYPE_HASH) {
+            memcpy(&hash_packet, client_message, sizeof(HASH_packet_t));
+
+            info(listener_logger, "Packet type: HASH.");
+            sprintf(log_msg, "(HASH) CRC_remainder = %d", hash_packet.CRC_remainder);
+            info(listener_logger, log_msg);
+
+            if (is_accepted) {
+                ack_packet.state = CONFIRM_CODE;
+            } else {
+                if (crc_32((unsigned char *)&hash_packet, sizeof(hash_packet)-sizeof(hash_packet.CRC_remainder)) == hash_packet.CRC_remainder) {
+                    if (compare_hash(hash_packet.hash, data_owner->file)) {
+                        ack_packet.state = CONFIRM_CODE;
+                        fclose(data_owner->file);
+                        is_accepted = 1;
+                        info(listener_logger, "No problems has been detected while sending a packet.");
+                    } else {
+                        ack_packet.state = NEGATIVE_CODE;
+                        warning(listener_logger, "Files hash does not match.");
+                    }
+                } else {
+                    ack_packet.state = NEGATIVE_CODE;
+                    warning(listener_logger, "Packet information has been corrupted. Waiting for the sender response.");
+                }
+            }
+
+            ack_packet.type = TYPE_ACK;
+            ack_packet.packet_n = 0;
+            ack_packet.CRC_remainder = crc_32((unsigned char *)&ack_packet, sizeof(ACK_packet_t)-sizeof(ack_packet.CRC_remainder));
+            info(listener_logger, "Sending ACK response...");
+
+            client_addr.sin_family = AF_INET;
+            client_addr.sin_addr.s_addr = inet_addr(inet_ntoa(client_addr.sin_addr));
+            client_addr.sin_port = htons(client_port);
+
+            if (sendto(server_socket, (unsigned char *)&ack_packet, sizeof(ACK_packet_t), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0) {
+                error(listener_logger, "Unable to send ACK message.");
+            } else {
+                info(listener_logger, "ACK message has been sent successfully.\n");
+            }
         } else {
             warning(listener_logger, "Unknown packet type.\n");
         }
     }
     stop_logging();
+}
+
+static unsigned char compare_hash(unsigned char *original_hash, FILE *data_file) {
+    SHA256_CTX ctx;
+    unsigned char buffer[1011];
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    int bytes_read;
+
+    fseek(data_file, 0, SEEK_SET);
+
+    SHA256_Init(&ctx);
+
+    while ((bytes_read = fread(buffer, sizeof(char), 1011, data_file)) != 0) {
+        SHA256_Update(&ctx, buffer, bytes_read);
+    }
+
+    SHA256_Final(hash, &ctx);
+    
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        printf("%2x\n", original_hash[i]);
+    }
+
+    return 1;
 }
 
 static void start_daemon() {

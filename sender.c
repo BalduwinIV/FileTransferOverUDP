@@ -17,7 +17,6 @@
 #include "logger.h"
 #include "tools.h"
 #include "packets.h"
-#include "crc.h"
 
 #define     BUF_SIZE            1024
 
